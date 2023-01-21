@@ -6,13 +6,21 @@ export type FieldElement =
 	| HTMLTextAreaElement
 	| HTMLButtonElement;
 
-export interface FieldConfig<Schema = unknown> extends FieldConstraint<Schema> {
+export interface FieldConfig<Schema = unknown> {
 	id?: string;
 	name: string;
 	defaultValue?: FieldValue<Schema>;
 	initialError?: Array<[string, string]>;
 	form?: string;
 	errorId?: string;
+	required?: boolean;
+	minLength?: number;
+	maxLength?: number;
+	min?: Schema extends number ? number : string;
+	max?: Schema extends number ? number : string;
+	step?: Schema extends number ? number : string;
+	multiple?: boolean;
+	pattern?: string;
 }
 
 export type FieldValue<Schema> = Schema extends Primitive
@@ -25,16 +33,65 @@ export type FieldValue<Schema> = Schema extends Primitive
 	? { [Key in keyof Schema]?: FieldValue<Schema[Key]> }
 	: unknown;
 
-export type FieldConstraint<Schema = any> = {
-	required?: boolean;
-	minLength?: number;
-	maxLength?: number;
-	min?: Schema extends number ? number : string;
-	max?: Schema extends number ? number : string;
-	step?: Schema extends number ? number : string;
-	multiple?: boolean;
-	pattern?: string;
-};
+export type FieldConstraint<Type> = (undefined extends Type
+	? {
+			required?: false;
+	  }
+	: {
+			required: true;
+	  }) &
+	(File extends Type
+		? {
+				type: 'file';
+				multiple?: false;
+		  }
+		: File[] extends Type
+		? {
+				type: 'file';
+				multiple: true;
+		  }
+		:
+				| {
+						type:
+							| 'text'
+							| 'password'
+							| 'search'
+							| 'email'
+							| 'url'
+							| 'tel'
+							| 'color';
+						minLength?: number;
+						maxLength?: number;
+						pattern?: string;
+				  }
+				| {
+						type: 'number' | 'range';
+						required?: boolean;
+						min?: number;
+						max?: number;
+						step?: number;
+				  }
+				| {
+						type: 'date' | 'datetime-local' | 'time' | 'month' | 'week';
+						required?: boolean;
+						min?: string;
+						max?: string;
+				  }
+				| {
+						type: 'checkbox' | 'radio';
+						required?: boolean;
+				  }
+				| {
+						type: 'select';
+						required?: boolean;
+						multiple?: boolean;
+				  }
+				| {
+						type: 'textarea';
+						required?: boolean;
+						minLength?: number;
+						maxLength?: number;
+				  });
 
 export type FieldsetConstraint<Schema extends Record<string, any>> = {
 	[Key in keyof Schema]?: FieldConstraint<Schema[Key]>;
@@ -518,3 +575,32 @@ export const list = new Proxy({} as ListCommandButtonBuilder, {
 		}
 	},
 });
+
+export function conformConstraint<Schema extends Record<string, any>>(
+	data: Schema,
+	constraints: FieldsetConstraint<Schema>,
+) {
+	const error: Array<[string, string]> = [];
+
+	for (const [name, constraint] of Object.entries(constraints)) {
+		const value = data[name];
+
+		if (constraint.required && value === '') {
+			error.push([name, 'required']);
+		}
+
+		if (
+			constraint.type === 'email' &&
+			typeof value === 'string' &&
+			!/^[^@]+@[^@]+$/.test(value)
+		) {
+			error.push([name, 'type']);
+		}
+
+		if (constraint.pattern && !new RegExp(constraint.pattern).test(value)) {
+			error.push([name, 'pattern']);
+		}
+	}
+
+	return error;
+}
