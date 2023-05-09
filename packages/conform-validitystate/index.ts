@@ -216,27 +216,6 @@ function isValidEmail(email: string): boolean {
 	);
 }
 
-/**
- * Check if the text matches the pattern as if pattern input attribute
- */
-function matchPattern(pattern: string, text: string): boolean {
-	if (pattern === '') {
-		return text === '';
-	}
-
-	let patternString = pattern;
-
-	if (!pattern.startsWith('^')) {
-		patternString = `^${patternString}`;
-	}
-
-	if (!pattern.endsWith('$')) {
-		patternString = `${patternString}$`;
-	}
-
-	return new RegExp(patternString).test(text);
-}
-
 function getDateConstraint(
 	text: string,
 	constraint: {
@@ -293,6 +272,86 @@ export interface Input {
 	maxLength?: number;
 	pattern?: string;
 	multiple?: boolean;
+}
+
+function valueMissingText(
+	text: string,
+	required: boolean | undefined,
+): boolean {
+	if (!required) {
+		return false;
+	}
+
+	return text === '';
+}
+
+function valueMissingFile(file: File, required: boolean | undefined): boolean {
+	if (!required) {
+		return false;
+	}
+
+	return file.name === '' && file.size === 0;
+}
+
+function typeMismatch(text: string, type: FieldConstraint['type']): boolean {
+	if (!text) {
+		return false;
+	}
+
+	if (type === 'email') {
+		return !isValidEmail(text);
+	} else if (type === 'url') {
+		return !isValidURL(text);
+	} else {
+		return false;
+	}
+}
+
+function tooShort(text: string, minLength: number | undefined): boolean {
+	return text.length < (minLength ?? 0);
+}
+
+function tooLong(text: string, maxLength: number | undefined): boolean {
+	return text.length > (maxLength ?? Infinity);
+}
+
+function patternMismatch(text: string, pattern: string | undefined): boolean {
+	if (!pattern) {
+		return false;
+	}
+
+	let patternString = pattern;
+
+	if (!pattern.startsWith('^')) {
+		patternString = `^${patternString}`;
+	}
+
+	if (!pattern.endsWith('$')) {
+		patternString = `${patternString}$`;
+	}
+
+	const isMatching = new RegExp(patternString).test(text);
+
+	return !isMatching;
+}
+
+function rangeUnderflowNumber(
+	number: number,
+	min: number | undefined,
+): boolean {
+	return typeof min !== 'undefined' && number < min;
+}
+
+function rangeOverflowNumber(number: number, max: number | undefined): boolean {
+	return typeof max !== 'undefined' && number > max;
+}
+
+function stepMismatchNumber(
+	number: number,
+	min: number | undefined,
+	step: number | undefined,
+) {
+	return (value - min) % step === 0;
 }
 
 function parseField(
@@ -502,7 +561,7 @@ export function parse<
 			valid: true,
 		};
 		const report = (key: ValidityKey, condition: boolean) => {
-			if (!condition) {
+			if (condition) {
 				// @ts-expect-error - ValidityState is immutable
 				validity[key] = true;
 				// @ts-expect-error - ValidityState is immutable
@@ -522,25 +581,15 @@ export function parse<
 				payloadMap.set(name, payload);
 				valueMap.set(name, value);
 
-				report('valueMissing', !constraint.required || payload !== '');
+				report('valueMissing', valueMissingText(payload, constraint.required));
 
 				if (payload !== '') {
-					report(
-						'typeMismatch',
-						constraint.type === 'email'
-							? isValidEmail(payload)
-							: constraint.type === 'url'
-							? isValidURL(payload)
-							: true,
-					);
-					report('tooShort', payload.length >= (constraint.minLength ?? 0));
-					report(
-						'tooLong',
-						payload.length <= (constraint.maxLength ?? Infinity),
-					);
+					report('typeMismatch', typeMismatch(payload, constraint.type));
+					report('tooShort', tooShort(payload, constraint.minLength));
+					report('tooLong', tooLong(payload, constraint.maxLength));
 					report(
 						'patternMismatch',
-						!constraint.pattern || matchPattern(constraint.pattern, payload),
+						patternMismatch(payload, constraint.pattern),
 					);
 				}
 				break;
@@ -551,7 +600,7 @@ export function parse<
 
 				payloadMap.set(name, payload);
 
-				report('valueMissing', !constraint.required || payload !== '');
+				report('valueMissing', valueMissingText(payload, constraint.required));
 
 				if (payload !== '') {
 					const isNumber = typeof value !== 'undefined';
@@ -578,7 +627,10 @@ export function parse<
 
 				valueMap.set(name, value);
 
-				report('valueMissing', !constraint.required || value);
+				report(
+					'valueMissing',
+					valueMissingText(payload ?? '', constraint.required),
+				);
 				break;
 			}
 			case 'datetime-local':
@@ -588,7 +640,7 @@ export function parse<
 
 				payloadMap.set(name, payload);
 
-				report('valueMissing', !constraint.required || payload !== '');
+				report('valueMissing', valueMissingText(payload, constraint.required));
 
 				if (payload !== '') {
 					const { date, min, max, step } = getDateConstraint(
@@ -666,11 +718,8 @@ export function parse<
 				report('valueMissing', !constraint.required || payload !== '');
 
 				if (payload) {
-					report('tooShort', payload.length >= (constraint.minLength ?? 0));
-					report(
-						'tooLong',
-						payload.length <= (constraint.maxLength ?? Infinity),
-					);
+					report('tooShort', tooShort(payload, constraint.minLength));
+					report('tooLong', tooLong(payload, constraint.maxLength));
 				}
 				break;
 			}
